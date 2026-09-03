@@ -1,0 +1,1209 @@
+diff --git a/simulation.py b/simulation.py
+new file mode 100755
+index 0000000..42b18b1
+--- /dev/null
++++ b/simulation.py
+@@ -0,0 +1,7 @@
++#!/usr/bin/env python3
++"""Main entry point for the ecosystem simulation."""
++import sys
++from simulation.cli import main
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/simulation/__init__.py b/simulation/__init__.py
+new file mode 100644
+index 0000000..d373a31
+--- /dev/null
++++ b/simulation/__init__.py
+@@ -0,0 +1,15 @@
++"""Ecosystem simulation package."""
++
++from simulation.animals import Animal, Rabbit, Fox, Grass
++from simulation.statistics import StatisticsTracker, PopulationStats
++from simulation.ecosystem import Ecosystem
++
++__all__ = [
++    "Animal",
++    "Rabbit",
++    "Fox",
++    "Grass",
++    "StatisticsTracker",
++    "PopulationStats",
++    "Ecosystem",
++]
+diff --git a/simulation/animals.py b/simulation/animals.py
+new file mode 100644
+index 0000000..53a966f
+--- /dev/null
++++ b/simulation/animals.py
+@@ -0,0 +1,325 @@
++"""Module containing the base animal class, specific animal species, and grass for the ecosystem simulation."""
++
++from __future__ import annotations
++from abc import ABC, abstractmethod
++import random
++from typing import ClassVar
++
++
++class Grass:
++    """Represents a patch of grass in the ecosystem grid.
++
++    Attributes:
++        position: A tuple of (x, y) coordinates representing the location on the grid.
++        energy_value: The nutritional energy gained by an animal consuming this grass.
++    """
++
++    def __init__(self, position: tuple[int, int], energy_value: float = 3.0) -> None:
++        """Initialize a new Grass patch.
++
++        Args:
++            position: The (x, y) coordinates on the grid.
++            energy_value: The amount of energy provided when eaten.
++        """
++        self.position: tuple[int, int] = position
++        self.energy_value: float = energy_value
++
++
++class Animal(ABC):
++    """Abstract base class representing an animal in the ecosystem.
++
++    Attributes:
++        id: A unique integer identifier for the animal.
++        position: The (x, y) coordinates on the grid.
++        energy: The current energy level of the animal.
++        age: The current age of the animal in time steps (days).
++        max_age: The maximum age the animal can reach before dying of old age.
++        energy_loss_rate: The amount of energy lost per simulation step.
++        reproduction_threshold: The minimum energy required to reproduce.
++        reproduction_cost: The energy consumed during reproduction.
++        alive: A boolean flag indicating whether the animal is currently alive.
++    """
++
++    _id_counter: ClassVar[int] = 1
++
++    @classmethod
++    def get_next_id(cls) -> int:
++        """Generate and return the next unique animal ID.
++
++        Returns:
++            A unique integer ID.
++        """
++        current_id = cls._id_counter
++        cls._id_counter += 1
++        return current_id
++
++    @classmethod
++    def reset_ids(cls) -> None:
++        """Reset the ID counter to 1. Useful for deterministic testing."""
++        cls._id_counter = 1
++
++    def __init__(
++        self,
++        position: tuple[int, int],
++        energy: float,
++        age: int = 0,
++        animal_id: int | None = None,
++        max_age: int = 25,
++        energy_loss_rate: float = 1.0,
++        reproduction_threshold: float = 20.0,
++        reproduction_cost: float = 12.0,
++    ) -> None:
++        """Initialize a new Animal instance.
++
++        Args:
++            position: Initial (x, y) grid coordinates.
++            energy: Initial energy level.
++            age: Initial age in days (defaults to 0).
++            animal_id: Unique identifier (auto-generated if None).
++            max_age: Maximum age before death.
++            energy_loss_rate: Energy lost each simulation step.
++            reproduction_threshold: Energy needed to reproduce.
++            reproduction_cost: Energy cost to create offspring.
++        """
++        self.id: int = animal_id if animal_id is not None else self.get_next_id()
++        self.position: tuple[int, int] = position
++        self.energy: float = float(energy)
++        self.age: int = age
++        self.max_age: int = max_age
++        self.energy_loss_rate: float = float(energy_loss_rate)
++        self.reproduction_threshold: float = float(reproduction_threshold)
++        self.reproduction_cost: float = float(reproduction_cost)
++        self.alive: bool = True
++
++    @staticmethod
++    def get_neighbors(
++        position: tuple[int, int],
++        width: int,
++        height: int,
++        include_self: bool = False,
++    ) -> list[tuple[int, int]]:
++        """Get valid neighboring grid coordinates around a position.
++
++        Args:
++            position: The (x, y) center position.
++            width: The width of the grid.
++            height: The height of the grid.
++            include_self: Whether to include the center position itself in the results.
++
++        Returns:
++            A list of valid (x, y) coordinate tuples sorted in deterministic order.
++        """
++        x, y = position
++        neighbors: list[tuple[int, int]] = []
++        for dx in (-1, 0, 1):
++            for dy in (-1, 0, 1):
++                if not include_self and dx == 0 and dy == 0:
++                    continue
++                nx, ny = x + dx, y + dy
++                if 0 <= nx < width and 0 <= ny < height:
++                    neighbors.append((nx, ny))
++        return neighbors
++
++    def move(self, grid_width: int, grid_height: int) -> tuple[int, int]:
++        """Move the animal to a random valid adjacent cell on the grid.
++
++        Args:
++            grid_width: Width of the grid.
++            grid_height: Height of the grid.
++
++        Returns:
++            The new position tuple (x, y).
++        """
++        if not self.is_alive():
++            return self.position
++        neighbors = self.get_neighbors(self.position, grid_width, grid_height, include_self=False)
++        if neighbors:
++            self.position = random.choice(neighbors)
++        return self.position
++
++    def lose_energy(self, amount: float | None = None) -> float:
++        """Decrease the animal's energy level.
++
++        Args:
++            amount: The amount of energy to subtract (defaults to energy_loss_rate).
++
++        Returns:
++            The remaining energy level.
++        """
++        loss = self.energy_loss_rate if amount is None else float(amount)
++        self.energy -= loss
++        if self.energy <= 0.0:
++            self.die()
++        return self.energy
++
++    def age_one_step(self) -> int:
++        """Increment the animal's age by one simulation step (day).
++
++        Returns:
++            The updated age.
++        """
++        self.age += 1
++        if self.age >= self.max_age:
++            self.die()
++        return self.age
++
++    def is_alive(self) -> bool:
++        """Check if the animal is currently alive.
++
++        Returns:
++            True if alive and energy > 0 and age < max_age, False otherwise.
++        """
++        if self.energy <= 0.0 or self.age >= self.max_age:
++            self.alive = False
++        return self.alive
++
++    def die(self) -> None:
++        """Mark the animal as dead and set its energy to zero."""
++        self.alive = False
++        self.energy = 0.0
++
++    def can_reproduce(self) -> bool:
++        """Check if the animal has enough energy and is alive to reproduce.
++
++        Returns:
++            True if reproduction is possible, False otherwise.
++        """
++        return self.is_alive() and self.energy >= self.reproduction_threshold
++
++    @abstractmethod
++    def reproduce(self) -> Animal | None:
++        """Create a new offspring animal if reproduction criteria are met.
++
++        Returns:
++            A new Animal instance if successful, or None if reproduction criteria are not met.
++        """
++        pass
++
++
++class Rabbit(Animal):
++    """Represents a rabbit (herbivore) in the ecosystem."""
++
++    def __init__(
++        self,
++        position: tuple[int, int],
++        energy: float = 10.0,
++        age: int = 0,
++        animal_id: int | None = None,
++        max_age: int = 25,
++        energy_loss_rate: float = 1.0,
++        reproduction_threshold: float = 20.0,
++        reproduction_cost: float = 12.0,
++        energy_gain_from_grass: float = 3.0,
++    ) -> None:
++        """Initialize a new Rabbit instance."""
++        super().__init__(
++            position=position,
++            energy=energy,
++            age=age,
++            animal_id=animal_id,
++            max_age=max_age,
++            energy_loss_rate=energy_loss_rate,
++            reproduction_threshold=reproduction_threshold,
++            reproduction_cost=reproduction_cost,
++        )
++        self.energy_gain_from_grass: float = float(energy_gain_from_grass)
++
++    def eat_grass(self, grass: Grass) -> float:
++        """Consume a patch of grass and gain energy.
++
++        Args:
++            grass: The Grass instance being eaten.
++
++        Returns:
++            The updated energy level of the rabbit.
++        """
++        if not self.is_alive():
++            return self.energy
++        self.energy += grass.energy_value if hasattr(grass, "energy_value") else self.energy_gain_from_grass
++        return self.energy
++
++    def reproduce(self) -> Rabbit | None:
++        """Reproduce to create a new offspring Rabbit.
++
++        Returns:
++            A new Rabbit instance if threshold is met, else None.
++        """
++        if not self.can_reproduce():
++            return None
++        self.energy -= self.reproduction_cost
++        offspring_energy = self.reproduction_cost
++        return Rabbit(
++            position=self.position,
++            energy=offspring_energy,
++            age=0,
++            max_age=self.max_age,
++            energy_loss_rate=self.energy_loss_rate,
++            reproduction_threshold=self.reproduction_threshold,
++            reproduction_cost=self.reproduction_cost,
++            energy_gain_from_grass=self.energy_gain_from_grass,
++        )
++
++
++class Fox(Animal):
++    """Represents a fox (predator) in the ecosystem."""
++
++    def __init__(
++        self,
++        position: tuple[int, int],
++        energy: float = 15.0,
++        age: int = 0,
++        animal_id: int | None = None,
++        max_age: int = 40,
++        energy_loss_rate: float = 1.0,
++        reproduction_threshold: float = 30.0,
++        reproduction_cost: float = 15.0,
++        energy_gain_from_rabbit: float = 8.0,
++    ) -> None:
++        """Initialize a new Fox instance."""
++        super().__init__(
++            position=position,
++            energy=energy,
++            age=age,
++            animal_id=animal_id,
++            max_age=max_age,
++            energy_loss_rate=energy_loss_rate,
++            reproduction_threshold=reproduction_threshold,
++            reproduction_cost=reproduction_cost,
++        )
++        self.energy_gain_from_rabbit: float = float(energy_gain_from_rabbit)
++
++    def hunt_rabbit(self, rabbit: Rabbit) -> float:
++        """Hunt and consume a rabbit to gain energy.
++
++        Args:
++            rabbit: The Rabbit instance being hunted.
++
++        Returns:
++            The updated energy level of the fox.
++        """
++        if not self.is_alive() or not rabbit.is_alive():
++            return self.energy
++        rabbit.die()
++        self.energy += self.energy_gain_from_rabbit
++        return self.energy
++
++    def reproduce(self) -> Fox | None:
++        """Reproduce to create a new offspring Fox.
++
++        Returns:
++            A new Fox instance if threshold is met, else None.
++        """
++        if not self.can_reproduce():
++            return None
++        self.energy -= self.reproduction_cost
++        offspring_energy = self.reproduction_cost
++        return Fox(
++            position=self.position,
++            energy=offspring_energy,
++            age=0,
++            max_age=self.max_age,
++            energy_loss_rate=self.energy_loss_rate,
++            reproduction_threshold=self.reproduction_threshold,
++            reproduction_cost=self.reproduction_cost,
++            energy_gain_from_rabbit=self.energy_gain_from_rabbit,
++        )
+diff --git a/simulation/cli.py b/simulation/cli.py
+new file mode 100644
+index 0000000..61999da
+--- /dev/null
++++ b/simulation/cli.py
+@@ -0,0 +1,122 @@
++"""Command-line interface for running the ecosystem simulation."""
++
++from __future__ import annotations
++import argparse
++import sys
++from typing import Sequence
++from simulation.ecosystem import Ecosystem
++
++
++def positive_int(value: str) -> int:
++    """Validate and convert argument to a positive integer (> 0)."""
++    try:
++        ivalue = int(value)
++        if ivalue <= 0:
++            raise ValueError()
++        return ivalue
++    except ValueError:
++        raise argparse.ArgumentTypeError(f"'{value}' is an invalid positive integer (> 0).")
++
++
++def non_negative_int(value: str) -> int:
++    """Validate and convert argument to a non-negative integer (>= 0)."""
++    try:
++        ivalue = int(value)
++        if ivalue < 0:
++            raise ValueError()
++        return ivalue
++    except ValueError:
++        raise argparse.ArgumentTypeError(f"'{value}' is an invalid non-negative integer (>= 0).")
++
++
++def parse_args(args: Sequence[str] | None = None) -> argparse.Namespace:
++    """Parse command line arguments for the simulation CLI.
++
++    Args:
++        args: Sequence of argument strings. Defaults to sys.argv[1:].
++
++    Returns:
++        Parsed arguments Namespace.
++    """
++    parser = argparse.ArgumentParser(
++        description="Run a 2D ecosystem simulation of rabbits, foxes, and grass."
++    )
++    parser.add_argument(
++        "--width",
++        type=positive_int,
++        default=30,
++        help="Grid width (number of columns, positive integer).",
++    )
++    parser.add_argument(
++        "--height",
++        type=positive_int,
++        default=30,
++        help="Grid height (number of rows, positive integer).",
++    )
++    parser.add_argument(
++        "--rabbits",
++        type=non_negative_int,
++        default=20,
++        help="Initial count of rabbits (non-negative integer).",
++    )
++    parser.add_argument(
++        "--foxes",
++        type=non_negative_int,
++        default=5,
++        help="Initial count of foxes (non-negative integer).",
++    )
++    parser.add_argument(
++        "--steps",
++        type=non_negative_int,
++        default=100,
++        help="Number of simulation steps to run (non-negative integer).",
++    )
++    parser.add_argument(
++        "--seed",
++        type=int,
++        default=None,
++        help="Random seed for reproducible results (integer).",
++    )
++    parser.add_argument(
++        "--output",
++        type=str,
++        default=None,
++        help="File path to save the population statistics CSV.",
++    )
++    return parser.parse_args(args)
++
++
++def main(args: Sequence[str] | None = None) -> int:
++    """Main execution function for the CLI.
++
++    Args:
++        args: Optional sequence of command-line argument strings.
++
++    Returns:
++        Exit status code (0 for success, non-zero for failure).
++    """
++    try:
++        parsed_args = parse_args(args)
++    except SystemExit as e:
++        return int(e.code) if e.code is not None else 1
++
++    try:
++        eco = Ecosystem(
++            width=parsed_args.width,
++            height=parsed_args.height,
++            initial_rabbits=parsed_args.rabbits,
++            initial_foxes=parsed_args.foxes,
++            seed=parsed_args.seed,
++        )
++        eco.run(steps=parsed_args.steps)
++        if parsed_args.output:
++            eco.stats.save_to_csv(parsed_args.output)
++        print(eco.format_summary())
++        return 0
++    except Exception as e:
++        print(f"Error running simulation: {e}", file=sys.stderr)
++        return 1
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/simulation/ecosystem.py b/simulation/ecosystem.py
+new file mode 100644
+index 0000000..fe95d53
+--- /dev/null
++++ b/simulation/ecosystem.py
+@@ -0,0 +1,236 @@
++"""Module defining the main Ecosystem simulation environment."""
++
++from __future__ import annotations
++import random
++from typing import Any
++from simulation.animals import Animal, Grass, Rabbit, Fox
++from simulation.statistics import StatisticsTracker
++
++
++class Ecosystem:
++    """Represents the two-dimensional ecosystem simulation grid and controls simulation stepping.
++
++    Attributes:
++        width: The grid width (number of columns).
++        height: The grid height (number of rows).
++        rabbits: List of currently living Rabbit instances.
++        foxes: List of currently living Fox instances.
++        grass: Dictionary mapping (x, y) coordinates to Grass instances.
++        stats: Tracker for recording population statistics.
++        current_step: Current simulation time step.
++        grass_growth_rate: Probability of grass growing in an empty cell during a step.
++    """
++
++    def __init__(
++        self,
++        width: int = 30,
++        height: int = 30,
++        initial_rabbits: int = 20,
++        initial_foxes: int = 5,
++        initial_grass: int | None = None,
++        grass_growth_rate: float = 0.1,
++        seed: int | None = None,
++    ) -> None:
++        """Initialize the ecosystem grid and populate initial animals and grass.
++
++        Args:
++            width: Grid width. Must be a positive integer.
++            height: Grid height. Must be a positive integer.
++            initial_rabbits: Starting count of rabbits. Must be non-negative.
++            initial_foxes: Starting count of foxes. Must be non-negative.
++            initial_grass: Starting count of grass patches. Defaults to 50% of grid capacity.
++            grass_growth_rate: Probability per step for grass to grow in empty cells.
++            seed: Optional random seed for reproducible simulations.
++
++        Raises:
++            ValueError: If grid dimensions or starting counts are invalid.
++        """
++        if width <= 0 or height <= 0:
++            raise ValueError("Grid width and height must be positive integers.")
++        if initial_rabbits < 0 or initial_foxes < 0:
++            raise ValueError("Initial population counts cannot be negative.")
++        if grass_growth_rate < 0.0 or grass_growth_rate > 1.0:
++            raise ValueError("Grass growth rate must be between 0.0 and 1.0.")
++
++        if seed is not None:
++            random.seed(seed)
++
++        self.width: int = width
++        self.height: int = height
++        self.grass_growth_rate: float = float(grass_growth_rate)
++        self.current_step: int = 0
++        self.stats: StatisticsTracker = StatisticsTracker()
++
++        self.rabbits: list[Rabbit] = []
++        self.foxes: list[Fox] = []
++        self.grass: dict[tuple[int, int], Grass] = {}
++
++        self._initialize_population(initial_rabbits, initial_foxes, initial_grass)
++        self._record_current_stats()
++
++    def _initialize_population(
++        self,
++        initial_rabbits: int,
++        initial_foxes: int,
++        initial_grass: int | None,
++    ) -> None:
++        """Populate the grid with initial grass and animals."""
++        total_cells = self.width * self.height
++        if initial_grass is None:
++            grass_count = int(total_cells * 0.5)
++        else:
++            if initial_grass < 0:
++                raise ValueError("Initial grass count cannot be negative.")
++            grass_count = min(initial_grass, total_cells)
++
++        all_coords = [(x, y) for x in range(self.width) for y in range(self.height)]
++        chosen_grass_coords = random.sample(all_coords, grass_count)
++        for coord in chosen_grass_coords:
++            self.grass[coord] = Grass(position=coord)
++
++        for _ in range(initial_rabbits):
++            pos = (random.randint(0, self.width - 1), random.randint(0, self.height - 1))
++            self.rabbits.append(Rabbit(position=pos))
++
++        for _ in range(initial_foxes):
++            pos = (random.randint(0, self.width - 1), random.randint(0, self.height - 1))
++            self.foxes.append(Fox(position=pos))
++
++    def _record_current_stats(self) -> None:
++        """Record current living animal and grass counts in the statistics tracker."""
++        self.stats.record_step(
++            step=self.current_step,
++            rabbits=len(self.rabbits),
++            foxes=len(self.foxes),
++            grass=len(self.grass),
++        )
++
++    def _grow_grass(self) -> None:
++        """Grow grass in empty grid cells according to the grass growth rate."""
++        for x in range(self.width):
++            for y in range(self.height):
++                coord = (x, y)
++                if coord not in self.grass:
++                    if random.random() < self.grass_growth_rate:
++                        self.grass[coord] = Grass(position=coord)
++
++    def _step_rabbits(self) -> list[Rabbit]:
++        """Execute one step for all living rabbits (move, eat, lose energy, age, reproduce).
++
++        Returns:
++            A list of newly born Rabbit offspring.
++        """
++        self.rabbits.sort(key=lambda r: r.id)
++        new_offspring: list[Rabbit] = []
++
++        for rabbit in list(self.rabbits):
++            if not rabbit.is_alive():
++                continue
++
++            rabbit.move(self.width, self.height)
++
++            nearby_cells = sorted(
++                Animal.get_neighbors(rabbit.position, self.width, self.height, include_self=True)
++            )
++            for cell in nearby_cells:
++                if cell in self.grass:
++                    grass_obj = self.grass.pop(cell)
++                    rabbit.eat_grass(grass_obj)
++                    break
++
++            rabbit.lose_energy()
++            rabbit.age_one_step()
++
++            if rabbit.is_alive() and rabbit.can_reproduce():
++                baby = rabbit.reproduce()
++                if baby is not None:
++                    new_offspring.append(baby)
++
++        return new_offspring
++
++    def _step_foxes(self) -> list[Fox]:
++        """Execute one step for all living foxes (move, hunt, lose energy, age, reproduce).
++
++        Returns:
++            A list of newly born Fox offspring.
++        """
++        self.foxes.sort(key=lambda f: f.id)
++        new_offspring: list[Fox] = []
++
++        for fox in list(self.foxes):
++            if not fox.is_alive():
++                continue
++
++            fox.move(self.width, self.height)
++
++            nearby_cells = set(
++                Animal.get_neighbors(fox.position, self.width, self.height, include_self=True)
++            )
++            living_rabbits = [
++                r for r in self.rabbits if r.is_alive() and r.position in nearby_cells
++            ]
++            living_rabbits.sort(key=lambda r: (r.position, r.id))
++
++            if living_rabbits:
++                target = living_rabbits[0]
++                fox.hunt_rabbit(target)
++
++            fox.lose_energy()
++            fox.age_one_step()
++
++            if fox.is_alive() and fox.can_reproduce():
++                baby = fox.reproduce()
++                if baby is not None:
++                    new_offspring.append(baby)
++
++        return new_offspring
++
++    def _cleanup_dead_animals(self) -> None:
++        """Remove dead animals from the ecosystem population lists."""
++        self.rabbits = [r for r in self.rabbits if r.is_alive()]
++        self.foxes = [f for f in self.foxes if f.is_alive()]
++
++    def step(self) -> None:
++        """Advance the ecosystem simulation by one discrete time step (one day)."""
++        self.current_step += 1
++
++        self._grow_grass()
++        new_rabbits = self._step_rabbits()
++        self.rabbits.extend(new_rabbits)
++        self._cleanup_dead_animals()
++
++        new_foxes = self._step_foxes()
++        self.foxes.extend(new_foxes)
++        self._cleanup_dead_animals()
++
++        self._record_current_stats()
++
++    def run(self, steps: int) -> None:
++        """Run the simulation for a specified number of time steps.
++
++        Args:
++            steps: Number of simulation steps to execute. Must be non-negative.
++
++        Raises:
++            ValueError: If steps is negative.
++        """
++        if steps < 0:
++            raise ValueError("Number of simulation steps cannot be negative.")
++        for _ in range(steps):
++            self.step()
++
++    def get_summary(self) -> dict[str, Any]:
++        """Get a summary dictionary of simulation statistics.
++
++        Returns:
++            Summary dictionary from the statistics tracker.
++        """
++        return self.stats.get_summary()
++
++    def format_summary(self) -> str:
++        """Get a formatted human-readable summary string of simulation statistics.
++
++        Returns:
++            Formatted summary string.
++        """
++        return self.stats.format_summary()
+diff --git a/simulation/statistics.py b/simulation/statistics.py
+new file mode 100644
+index 0000000..3ceb364
+--- /dev/null
++++ b/simulation/statistics.py
+@@ -0,0 +1,124 @@
++"""Module for recording, summarizing, and exporting ecosystem population statistics."""
++
++from __future__ import annotations
++import csv
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any
++
++
++@dataclass
++class PopulationStats:
++    """Represents the population counts at a single simulation time step.
++
++    Attributes:
++        step: The simulation step number (day).
++        rabbits: The count of living rabbits.
++        foxes: The count of living foxes.
++        grass: The count of grass patches.
++    """
++
++    step: int
++    rabbits: int
++    foxes: int
++    grass: int
++
++
++class StatisticsTracker:
++    """Tracks ecosystem population statistics over time and provides summaries and CSV export."""
++
++    def __init__(self) -> None:
++        """Initialize a new StatisticsTracker instance."""
++        self.history: list[PopulationStats] = []
++
++    def record_step(self, step: int, rabbits: int, foxes: int, grass: int) -> None:
++        """Record the population statistics for a specific simulation step.
++
++        Args:
++            step: The current step number.
++            rabbits: Number of living rabbits.
++            foxes: Number of living foxes.
++            grass: Number of grass patches.
++        """
++        self.history.append(
++            PopulationStats(
++                step=step,
++                rabbits=rabbits,
++                foxes=foxes,
++                grass=grass,
++            )
++        )
++
++    def save_to_csv(self, filepath: str | Path) -> None:
++        """Save the recorded statistics history to a CSV file.
++
++        Args:
++            filepath: Destination path for the CSV file.
++        """
++        path = Path(filepath)
++        path.parent.mkdir(parents=True, exist_ok=True)
++        with open(path, mode="w", newline="", encoding="utf-8") as csvfile:
++            writer = csv.writer(csvfile)
++            writer.writerow(["step", "rabbits", "foxes", "grass"])
++            for stats in self.history:
++                writer.writerow([stats.step, stats.rabbits, stats.foxes, stats.grass])
++
++    def get_summary(self) -> dict[str, Any]:
++        """Calculate and return a summary of the simulation statistics.
++
++        Returns:
++            A dictionary containing total steps, final counts, and min/max population sizes.
++        """
++        if not self.history:
++            return {
++                "total_steps": 0,
++                "final_rabbits": 0,
++                "final_foxes": 0,
++                "final_grass": 0,
++                "max_rabbits": 0,
++                "min_rabbits": 0,
++                "max_foxes": 0,
++                "min_foxes": 0,
++                "max_grass": 0,
++                "min_grass": 0,
++            }
++
++        final = self.history[-1]
++        rabbits_series = [s.rabbits for s in self.history]
++        foxes_series = [s.foxes for s in self.history]
++        grass_series = [s.grass for s in self.history]
++
++        return {
++            "total_steps": final.step,
++            "final_rabbits": final.rabbits,
++            "final_foxes": final.foxes,
++            "final_grass": final.grass,
++            "max_rabbits": max(rabbits_series),
++            "min_rabbits": min(rabbits_series),
++            "max_foxes": max(foxes_series),
++            "min_foxes": min(foxes_series),
++            "max_grass": max(grass_series),
++            "min_grass": min(grass_series),
++        }
++
++    def format_summary(self) -> str:
++        """Format the simulation summary into a human-readable string.
++
++        Returns:
++            A formatted multi-line summary string.
++        """
++        summary = self.get_summary()
++        lines = [
++            "=== Simulation Summary ===",
++            f"Total Simulation Steps: {summary['total_steps']}",
++            "Final Population:",
++            f"  - Rabbits: {summary['final_rabbits']}",
++            f"  - Foxes:   {summary['final_foxes']}",
++            f"  - Grass:   {summary['final_grass']}",
++            "Population Extremes:",
++            f"  - Rabbits: Min = {summary['min_rabbits']}, Max = {summary['max_rabbits']}",
++            f"  - Foxes:   Min = {summary['min_foxes']}, Max = {summary['max_foxes']}",
++            f"  - Grass:   Min = {summary['min_grass']}, Max = {summary['max_grass']}",
++            "==========================",
++        ]
++        return "\n".join(lines)
+diff --git a/tests/test_animals.py b/tests/test_animals.py
+new file mode 100644
+index 0000000..4d11010
+--- /dev/null
++++ b/tests/test_animals.py
+@@ -0,0 +1,120 @@
++"""Unit tests for animals and grass classes."""
++
++import sys
++import os
++import pytest
++sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
++
++from simulation.animals import Animal, Rabbit, Fox, Grass
++
++
++@pytest.fixture(autouse=True)
++def reset_animal_ids():
++    """Reset animal ID counter before each test for deterministic ID generation."""
++    Animal.reset_ids()
++
++
++def test_grass_initialization():
++    grass = Grass(position=(2, 3), energy_value=5.0)
++    assert grass.position == (2, 3)
++    assert grass.energy_value == 5.0
++
++
++def test_animals_lose_energy_correctly():
++    rabbit = Rabbit(position=(0, 0), energy=10.0, energy_loss_rate=1.5)
++    remaining = rabbit.lose_energy()
++    assert remaining == 8.5
++    assert rabbit.energy == 8.5
++    assert rabbit.is_alive()
++
++    # Test custom amount
++    rabbit.lose_energy(5.0)
++    assert rabbit.energy == 3.5
++
++    # Test dying from energy loss
++    rabbit.lose_energy(10.0)
++    assert rabbit.energy == 0.0
++    assert not rabbit.is_alive()
++
++
++def test_animals_age_correctly():
++    fox = Fox(position=(1, 1), age=38, max_age=40)
++    assert fox.is_alive()
++    
++    age = fox.age_one_step()
++    assert age == 39
++    assert fox.is_alive()
++
++    age = fox.age_one_step()
++    assert age == 40
++    assert not fox.is_alive()
++
++
++def test_dead_animals_status():
++    rabbit = Rabbit(position=(0, 0), energy=10.0, age=0, max_age=10)
++    assert rabbit.is_alive()
++    rabbit.die()
++    assert not rabbit.is_alive()
++    assert rabbit.energy == 0.0
++
++
++def test_rabbits_can_eat_grass():
++    rabbit = Rabbit(position=(0, 0), energy=10.0, energy_gain_from_grass=4.0)
++    grass = Grass(position=(0, 0), energy_value=4.0)
++    
++    rabbit.eat_grass(grass)
++    assert rabbit.energy == 14.0
++
++    # Dead rabbit cannot eat
++    rabbit.die()
++    rabbit.eat_grass(grass)
++    assert rabbit.energy == 0.0
++
++
++def test_foxes_can_hunt_rabbits():
++    fox = Fox(position=(3, 3), energy=15.0, energy_gain_from_rabbit=10.0)
++    rabbit = Rabbit(position=(3, 3), energy=12.0)
++    
++    assert rabbit.is_alive()
++    fox.hunt_rabbit(rabbit)
++    assert not rabbit.is_alive()
++    assert rabbit.energy == 0.0
++    assert fox.energy == 25.0
++
++    # Hunting already dead rabbit should not increase energy
++    fox.hunt_rabbit(rabbit)
++    assert fox.energy == 25.0
++
++
++def test_reproduction_creates_valid_new_animals():
++    rabbit = Rabbit(
++        position=(5, 5),
++        energy=25.0,
++        reproduction_threshold=20.0,
++        reproduction_cost=12.0,
++    )
++    assert rabbit.can_reproduce()
++    
++    offspring = rabbit.reproduce()
++    assert offspring is not None
++    assert isinstance(offspring, Rabbit)
++    assert offspring.position == (5, 5)
++    assert offspring.energy == 12.0
++    assert offspring.age == 0
++    assert offspring.is_alive()
++    assert rabbit.energy == 13.0  # 25 - 12
++    assert offspring.id != rabbit.id
++
++    # Cannot reproduce if energy below threshold
++    assert not rabbit.can_reproduce()
++    assert rabbit.reproduce() is None
++
++
++def test_animal_movement_within_bounds():
++    rabbit = Rabbit(position=(0, 0), energy=10.0)
++    for _ in range(20):
++        pos = rabbit.move(grid_width=5, grid_height=5)
++        x, y = pos
++        assert 0 <= x < 5
++        assert 0 <= y < 5
++        assert rabbit.position == pos
+diff --git a/tests/test_ecosystem.py b/tests/test_ecosystem.py
+new file mode 100644
+index 0000000..37dc80b
+--- /dev/null
++++ b/tests/test_ecosystem.py
+@@ -0,0 +1,93 @@
++"""Unit tests for the Ecosystem simulation class."""
++
++import sys
++import os
++import pytest
++sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
++
++from simulation.ecosystem import Ecosystem
++from simulation.animals import Animal, Rabbit, Fox, Grass
++
++
++@pytest.fixture(autouse=True)
++def reset_animal_ids():
++    """Reset animal ID counter before each test for deterministic ID generation."""
++    Animal.reset_ids()
++
++
++def test_ecosystem_invalid_initialization():
++    with pytest.raises(ValueError):
++        Ecosystem(width=0, height=10)
++    with pytest.raises(ValueError):
++        Ecosystem(width=10, height=-5)
++    with pytest.raises(ValueError):
++        Ecosystem(initial_rabbits=-1)
++    with pytest.raises(ValueError):
++        Ecosystem(initial_foxes=-5)
++    with pytest.raises(ValueError):
++        Ecosystem(grass_growth_rate=1.5)
++    with pytest.raises(ValueError):
++        Ecosystem(initial_grass=-10)
++
++
++def test_dead_animals_are_removed():
++    eco = Ecosystem(width=10, height=10, initial_rabbits=1, initial_foxes=1, grass_growth_rate=0.0)
++    rabbit = eco.rabbits[0]
++    fox = eco.foxes[0]
++    
++    # Force animals to die
++    rabbit.die()
++    fox.die()
++    
++    eco.step()
++    assert len(eco.rabbits) == 0
++    assert len(eco.foxes) == 0
++
++
++def test_rabbits_eat_grass_in_ecosystem():
++    eco = Ecosystem(width=5, height=5, initial_rabbits=0, initial_foxes=0, initial_grass=0, grass_growth_rate=0.0)
++    rabbit = Rabbit(position=(2, 2), energy=10.0)
++    eco.rabbits.append(rabbit)
++    eco.grass[(2, 2)] = Grass(position=(2, 2), energy_value=5.0)
++    
++    for dx in [-1, 0, 1]:
++        for dy in [-1, 0, 1]:
++            eco.grass[(2 + dx, 2 + dy)] = Grass(position=(2 + dx, 2 + dy), energy_value=5.0)
++            
++    eco.step()
++    assert rabbit.energy == 14.0
++
++
++def test_foxes_hunt_rabbits_in_ecosystem():
++    eco = Ecosystem(width=2, height=2, initial_rabbits=0, initial_foxes=0, initial_grass=0, grass_growth_rate=0.0)
++    fox = Fox(position=(0, 0), energy=15.0, energy_gain_from_rabbit=10.0)
++    rabbit = Rabbit(position=(0, 0), energy=10.0)
++    
++    eco.foxes.append(fox)
++    eco.rabbits.append(rabbit)
++    
++    eco.step()
++    assert len(eco.rabbits) == 0
++    assert fox.energy == 24.0
++
++
++def test_reproduction_in_ecosystem():
++    eco = Ecosystem(width=5, height=5, initial_rabbits=0, initial_foxes=0, initial_grass=0, grass_growth_rate=0.0)
++    rabbit = Rabbit(position=(2, 2), energy=25.0, reproduction_threshold=20.0, reproduction_cost=10.0)
++    eco.rabbits.append(rabbit)
++    
++    eco.step()
++    assert len(eco.rabbits) == 2
++
++
++def test_reproducible_results_with_seed():
++    eco1 = Ecosystem(width=20, height=20, initial_rabbits=15, initial_foxes=4, seed=12345)
++    eco1.run(20)
++    
++    eco2 = Ecosystem(width=20, height=20, initial_rabbits=15, initial_foxes=4, seed=12345)
++    eco2.run(20)
++    
++    assert len(eco1.rabbits) == len(eco2.rabbits)
++    assert len(eco1.foxes) == len(eco2.foxes)
++    assert len(eco1.grass) == len(eco2.grass)
++    assert eco1.stats.history == eco2.stats.history
+diff --git a/tests/test_statistics.py b/tests/test_statistics.py
+new file mode 100644
+index 0000000..f9ed135
+--- /dev/null
++++ b/tests/test_statistics.py
+@@ -0,0 +1,113 @@
++"""Unit tests for statistics tracking, CSV output, and CLI argument validation."""
++
++import sys
++import os
++import csv
++import tempfile
++from pathlib import Path
++import pytest
++sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
++
++from simulation.statistics import StatisticsTracker, PopulationStats
++from simulation.cli import parse_args, main
++
++
++def test_statistics_tracker_recording():
++    tracker = StatisticsTracker()
++    tracker.record_step(0, 10, 5, 100)
++    tracker.record_step(1, 12, 5, 95)
++    
++    assert len(tracker.history) == 2
++    assert tracker.history[0] == PopulationStats(0, 10, 5, 100)
++    assert tracker.history[1] == PopulationStats(1, 12, 5, 95)
++
++
++def test_statistics_summary_calculations():
++    tracker = StatisticsTracker()
++    tracker.record_step(0, 20, 5, 100)
++    tracker.record_step(1, 30, 8, 80)
++    tracker.record_step(2, 15, 4, 120)
++    
++    summary = tracker.get_summary()
++    assert summary["total_steps"] == 2
++    assert summary["final_rabbits"] == 15
++    assert summary["final_foxes"] == 4
++    assert summary["final_grass"] == 120
++    assert summary["max_rabbits"] == 30
++    assert summary["min_rabbits"] == 15
++    assert summary["max_foxes"] == 8
++    assert summary["min_foxes"] == 4
++    assert summary["max_grass"] == 120
++    assert summary["min_grass"] == 80
++
++
++def test_empty_statistics_summary():
++    tracker = StatisticsTracker()
++    summary = tracker.get_summary()
++    assert summary["total_steps"] == 0
++    assert summary["final_rabbits"] == 0
++
++
++def test_statistics_written_correctly_to_csv():
++    tracker = StatisticsTracker()
++    tracker.record_step(0, 20, 5, 100)
++    tracker.record_step(1, 22, 6, 95)
++    
++    with tempfile.TemporaryDirectory() as tmpdir:
++        csv_path = Path(tmpdir) / "stats.csv"
++        tracker.save_to_csv(csv_path)
++        
++        assert csv_path.exists()
++        with open(csv_path, mode="r", encoding="utf-8") as f:
++            reader = list(csv.reader(f))
++            assert len(reader) == 3
++            assert reader[0] == ["step", "rabbits", "foxes", "grass"]
++            assert reader[1] == ["0", "20", "5", "100"]
++            assert reader[2] == ["1", "22", "6", "95"]
++
++
++def test_valid_cli_argument_parsing():
++    args = parse_args([
++        "--width", "40",
++        "--height", "50",
++        "--rabbits", "15",
++        "--foxes", "3",
++        "--steps", "10",
++        "--seed", "999",
++        "--output", "out.csv"
++    ])
++    assert args.width == 40
++    assert args.height == 50
++    assert args.rabbits == 15
++    assert args.foxes == 3
++    assert args.steps == 10
++    assert args.seed == 999
++    assert args.output == "out.csv"
++
++
++def test_invalid_cli_arguments():
++    with pytest.raises(SystemExit):
++        parse_args(["--width", "-10"])
++    with pytest.raises(SystemExit):
++        parse_args(["--height", "0"])
++    with pytest.raises(SystemExit):
++        parse_args(["--rabbits", "-5"])
++    with pytest.raises(SystemExit):
++        parse_args(["--foxes", "-1"])
++    with pytest.raises(SystemExit):
++        parse_args(["--steps", "-50"])
++    with pytest.raises(SystemExit):
++        parse_args(["--width", "abc"])
++
++
++def test_cli_main_execution():
++    with tempfile.TemporaryDirectory() as tmpdir:
++        out_file = Path(tmpdir) / "cli_test.csv"
++        ret = main(["--steps", "5", "--seed", "42", "--output", str(out_file)])
++        assert ret == 0
++        assert out_file.exists()
++
++
++def test_cli_main_invalid_execution():
++    ret = main(["--width", "-5"])
++    assert ret != 0

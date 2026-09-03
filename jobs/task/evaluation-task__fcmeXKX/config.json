@@ -1,0 +1,25 @@
+{
+    "task": {
+        "path": "evaluation-task"
+    },
+    "trial_name": "evaluation-task__fcmeXKX",
+    "trials_dir": "jobs/task",
+    "agent": {
+        "name": "mini-swe-agent",
+        "model_name": "anthropic/gyges",
+        "kwargs": {
+            "config": {
+                "model": {
+                    "model_kwargs": {
+                        "api_base": "https://app-llmproxy.dataannotation.tech/api/llm_proxy/anthropic",
+                        "max_tokens": 32000
+                    }
+                }
+            }
+        },
+        "env": {
+            "ANTHROPIC_BASE_URL": "https://app-llmproxy.dataannotation.tech/api/llm_proxy/anthropic"
+        }
+    },
+    "job_id": "24e24941-7428-4ca7-910b-48c6c1fec7b8"
+}

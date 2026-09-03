@@ -1,0 +1,21 @@
+agents:
+  - name: mini-swe-agent
+    model_name: gemini/keats
+    env:
+      GEMINI_API_BASE: https://app-llmproxy.dataannotation.tech/api/llm_proxy/gemini/v1beta
+      GOOGLE_BASE_URL: https://app-llmproxy.dataannotation.tech/api/llm_proxy/gemini/v1beta
+    kwargs:
+      config:
+        model:
+          model_kwargs:
+            api_base: https://app-llmproxy.dataannotation.tech/api/llm_proxy/gemini/v1beta
+  - name: mini-swe-agent
+    model_name: anthropic/gyges
+    env:
+      ANTHROPIC_BASE_URL: https://app-llmproxy.dataannotation.tech/api/llm_proxy/anthropic
+    kwargs:
+      config:
+        model:
+          model_kwargs:
+            api_base: https://app-llmproxy.dataannotation.tech/api/llm_proxy/anthropic
+            max_tokens: 32000
